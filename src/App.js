@@ -102,6 +102,30 @@ async function fetchCatalog() {
   }));
 }
 
+// Получить блог-посты из Appwrite
+async function fetchBlogPosts() {
+  const BLOG_COLLECTION_ID = "685318f00019ac7b6ef1";
+  const response = await databases.listDocuments(DATABASE_ID, BLOG_COLLECTION_ID, [Query.limit(100)]);
+  return response.documents.map(doc => ({
+    id: doc.$id,
+    title: doc.title,
+    caption: doc.caption,
+    likes: doc.likes || 0
+  }));
+}
+
+// Получить услуги из Appwrite
+async function fetchServices() {
+  const SERVICES_COLLECTION_ID = "68531ad00022e1c67aac";
+  const response = await databases.listDocuments(DATABASE_ID, SERVICES_COLLECTION_ID, [Query.limit(100)]);
+  return response.documents.map(doc => ({
+    id: doc.$id,
+    name: doc.name,
+    caption: doc.caption,
+    contacts: doc.contacts
+  }));
+}
+
 // Каталожная карточка
 function Card({ item }) {
   const calculateAverageRating = (ratings) => {
@@ -252,8 +276,28 @@ function VacancyModal({ isOpen, onClose }) {
   );
 }
 
+// Header-компонент
+function Header({ onVacancyClick }) {
+  return (
+    <header className="main-header">
+      <div className="header-content">
+        <Link to="/" className="header-logo">Каталог студий</Link>
+        <div className="header-actions">
+          <nav className="header-nav">
+            <Link to="/blog" className="header-link">Блог</Link>
+            <Link to="/services" className="header-link">Услуги</Link>
+          </nav>
+          <button className="vacancy-btn" onClick={onVacancyClick}>
+            Подать заявку
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 // Каталог: фильтры, поиск + загрузка из базы
-function Catalog() {
+function Catalog({ onVacancyClick }) {
   const [category, setCategory] = useState("Все");
   const [search, setSearch] = useState("");
   const [items, setItems] = useState([]);
@@ -327,12 +371,6 @@ function Catalog() {
         <div className="hero-content">
           <h1>Каталог вебкам студий</h1>
           <p>Откройте для себя лучшие вебкам студии, собранные в этом каталоге</p>
-          <button 
-            className="vacancy-btn"
-            onClick={() => setShowVacancyModal(true)}
-          >
-            Подать заявку
-          </button>
         </div>
       </section>
       
@@ -567,14 +605,167 @@ function Detail() {
   );
 }
 
+function BlogPage() {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState({});
+  const [likes, setLikes] = useState({});
+
+  useEffect(() => {
+    fetchBlogPosts()
+      .then(data => {
+        setPosts(data);
+        setLoading(false);
+        // Инициализация лайков из localStorage
+        const stored = localStorage.getItem('blogLikes') || '{}';
+        setLikes(JSON.parse(stored));
+      })
+      .catch(() => {
+        setError('Ошибка загрузки постов');
+        setLoading(false);
+      });
+  }, []);
+
+  const handleToggleExpand = (id) => {
+    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleLike = async (id, liked) => {
+    const post = posts.find(p => p.id === id);
+    if (!post) return;
+    let newLikes = post.likes;
+    let newLiked = { ...likes };
+    if (!liked) {
+      newLikes = post.likes + 1;
+      newLiked[id] = true;
+    } else {
+      newLikes = Math.max(0, post.likes - 1);
+      newLiked[id] = false;
+    }
+    setPosts(posts.map(p => p.id === id ? { ...p, likes: newLikes } : p));
+    setLikes(newLiked);
+    localStorage.setItem('blogLikes', JSON.stringify(newLiked));
+    try {
+      await databases.updateDocument(
+        DATABASE_ID,
+        "685318f00019ac7b6ef1",
+        id,
+        { likes: newLikes }
+      );
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  if (loading) return <div className="catalog-empty">Загрузка...</div>;
+  if (error) return <div className="catalog-empty">{error}</div>;
+
+  return (
+    <main className="blog-main">
+      <h1>Блог</h1>
+      <div className="blog-list">
+        {posts.map(post => {
+          const isExpanded = expanded[post.id];
+          const liked = likes[post.id];
+          return (
+            <div className="blog-post" key={post.id}>
+              <h2 className="blog-title">{post.title}</h2>
+              <div className="blog-caption">
+                {isExpanded ? post.caption : post.caption.slice(0, 150) + (post.caption.length > 150 ? '...' : '')}
+                {post.caption.length > 150 && (
+                  <button className="show-more-btn" onClick={() => handleToggleExpand(post.id)}>
+                    {isExpanded ? 'Скрыть' : 'Показать полностью'}
+                  </button>
+                )}
+              </div>
+              <button className={"like-btn" + (liked ? " liked" : "")}
+                onClick={() => handleLike(post.id, liked)}>
+                {liked ? '❤️' : '🤍'} {post.likes}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </main>
+  );
+}
+
+function ServicesPage() {
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState({});
+  const [showContacts, setShowContacts] = useState({});
+
+  useEffect(() => {
+    fetchServices()
+      .then(data => {
+        setServices(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError('Ошибка загрузки услуг');
+        setLoading(false);
+      });
+  }, []);
+
+  const handleToggleExpand = (id) => {
+    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleShowContacts = (id) => {
+    setShowContacts(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  if (loading) return <div className="catalog-empty">Загрузка...</div>;
+  if (error) return <div className="catalog-empty">{error}</div>;
+
+  return (
+    <main className="services-main">
+      <h1>Услуги</h1>
+      <div className="services-list">
+        {services.map(service => {
+          const isExpanded = expanded[service.id];
+          const contactsVisible = showContacts[service.id];
+          return (
+            <div className="service-post" key={service.id}>
+              <h2 className="service-title">{service.name}</h2>
+              <div className="service-caption">
+                {isExpanded ? service.caption : service.caption.slice(0, 150) + (service.caption.length > 150 ? '...' : '')}
+                {service.caption.length > 150 && (
+                  <button className="show-more-btn" onClick={() => handleToggleExpand(service.id)}>
+                    {isExpanded ? 'Скрыть' : 'Показать полностью'}
+                  </button>
+                )}
+              </div>
+              <button className="respond-btn" onClick={() => handleShowContacts(service.id)}>
+                {contactsVisible ? 'Скрыть контакты' : 'Показать контакты'}
+              </button>
+              {contactsVisible && (
+                <div className="service-contacts">{service.contacts}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </main>
+  );
+}
+
 function App() {
+  const [showVacancyModal, setShowVacancyModal] = useState(false);
   return (
     <BrowserRouter>
       <div className="app-container">
+        <Header onVacancyClick={() => setShowVacancyModal(true)} />
         <Routes>
           <Route path="/item/:id" element={<Detail />} />
-          <Route path="/" element={<Catalog />} />
+          <Route path="/" element={<Catalog onVacancyClick={() => setShowVacancyModal(true)} />} />
+          <Route path="/blog" element={<BlogPage />} />
+          <Route path="/services" element={<ServicesPage />} />
         </Routes>
+        <VacancyModal isOpen={showVacancyModal} onClose={() => setShowVacancyModal(false)} />
       </div>
     </BrowserRouter>
   );
